@@ -4,12 +4,13 @@ import server from './server.js';
 
 interface Booking {
     id: string;
-    title: string;
+    slotId: number;
+    userId: number;
     enabled: boolean;
 }
 
 const parseBody = <T>(req: IncomingMessage): Promise<T> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         let body = '';
 
         req.on('data', (chunk) => {
@@ -20,82 +21,72 @@ const parseBody = <T>(req: IncomingMessage): Promise<T> => {
             try {
                 resolve(JSON.parse(body));
             } catch (e) {
-                resolve({} as T);
+                reject('Invalid JSON Body');
             }
         });
     });
 };
 
-let bookings: Booking[] = [];
+let bookings = new Map<string, Booking>();
 
 const app = server();
 
+app.get('/', async (req, res) => {
+    res.end(JSON.stringify('Hello'))
+})
+
 app.get('/bookings', async (req, res) => {
-    res.end(JSON.stringify({data: bookings}));
+    res.end(JSON.stringify(Array.from(bookings.values())));
 });
 
 app.post('/bookings', async (req, res) => {
-    const body = await parseBody<Omit<Booking, 'id'>>(req);
-
-    if (!body.title) {
+    const body = await parseBody<Omit<Booking, 'id' | 'enabled'>>(req);
+    if (!body.slotId || !body.userId) {
         res.statusCode = 400;
-        res.end(JSON.stringify({message: 'Title not found'}));
+        res.end(JSON.stringify({message: 'Invalid booking data'}));
+        return;
+    }
+
+    const existed = Array.from(bookings.values()).find((b) => b.slotId === body.slotId && b.userId === body.userId);
+    if (existed) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({message: `User #${body.userId} already booked to slot #${body.slotId}`}));
         return;
     }
 
     const created = {
         id: crypto.randomUUID(),
-        title: body.title,
+        slotId: body.slotId,
+        userId: body.userId,
         enabled: true,
     };
 
-    bookings.push(created);
+    bookings.set(created.id, created);
 
+    res.statusCode = 201;
     res.end(JSON.stringify(created));
 });
 
 app.get('/bookings/:id', async (req, res) => {
     const id = req.params?.id ?? null;
-
-    if (!id) {
+    if (!id || !bookings.has(id)) {
         res.statusCode = 404;
         res.end(JSON.stringify({message: `Booking #${id} not found`}));
         return;
     }
 
-    const booking = bookings.find(booking => booking.id === id);
-    if (!booking) {
-        res.statusCode = 404;
-        res.end(JSON.stringify({message: `Booking #${id} not found`}));
-        return;
-    }
-
-    res.end(JSON.stringify(booking));
+    res.end(JSON.stringify(bookings.get(id)));
 });
 
 app.post('/bookings/:id/cancel', async (req, res) => {
     const id = req.params?.id ?? null;
-
-    if (!id) {
+    if (!id || !bookings.has(id)) {
         res.statusCode = 404;
         res.end(JSON.stringify({message: `Booking #${id} not found`}));
         return;
     }
 
-    let isUpdated = false;
-    bookings = bookings.map((booking) => {
-        if (booking.id === id) {
-            isUpdated = true;
-            return {...booking, enabled: false};
-        }
-        return booking;
-    });
-
-    if (!isUpdated) {
-        res.statusCode = 404;
-        res.end(JSON.stringify({message: `Booking #${id} not found`}));
-        return;
-    }
+    bookings.set(id, {...bookings.get(id)!, enabled: false},);
 
     res.end(JSON.stringify({status: 'OK'}));
 });
