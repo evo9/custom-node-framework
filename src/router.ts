@@ -8,7 +8,7 @@ export type RouteHandler = (req: Request, res: ServerResponse) => void | Promise
 export interface Route {
     path: string;
     method: HttpMethod;
-    pattern: string;
+    regex: RegExp;
     params: string[];
     handler: RouteHandler;
 }
@@ -36,7 +36,7 @@ export class Router {
         }, {segments: [], params: []} as { segments: string[]; params: string[] });
 
         this._routes.push({
-            pattern: `^${segments.join('/')}$`,
+            regex: new RegExp(`^${segments.join('/')}$`),
             path,
             method,
             params,
@@ -46,11 +46,11 @@ export class Router {
 
     public findRoute(url: string, method: HttpMethod): CurrentRoute | null {
         const route = this._routes.find((route: Route) => {
-            return (new RegExp(route.pattern)).test(url) && (route.method === method);
+            return route.regex.test(url) && (route.method === method);
         });
         if (!route) return null;
 
-        const matches = (new RegExp(route.pattern)).exec(url);
+        const matches = route.regex.exec(url);
         if (!matches) return null;
 
         const params: Record<string, string> = route.params.reduce((acc, param, i) => {
